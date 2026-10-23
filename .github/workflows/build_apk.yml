@@ -1,76 +1,91 @@
-name: Build IRIS Android APK (Cloud Builder)
+name: Build IRIS Android APK
 
 on:
   push:
-    branches: [ "*" ]
+    branches: ["**"]
   pull_request:
-    branches: [ "*" ]
+    branches: ["**"]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build-android-apk:
-    name: Build Release APK
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Locate or Unpack Flutter Project Root
+      - name: Locate or unpack Flutter project
         id: locate
+        shell: bash
         run: |
+          set -euo pipefail
+
           if [ ! -f "pubspec.yaml" ]; then
-            if ls iris_chunk_*.b64 >/dev/null 2>&1; then
-              echo "Reassembling iris_chunk_*.b64..."
-              cat iris_chunk_*.b64 | tr -d '\n\r ' | base64 -d | tar -xJf -
-            else
-              ZIP_FILE=$(find . -maxdepth 2 -name "*.zip" | head -n 1)
-              if [ -n "$ZIP_FILE" ]; then
-                echo "Unpacking $ZIP_FILE..."
-                unzip -q -o "$ZIP_FILE"
+            echo "No Flutter project at repo root; checking for bundled archives..."
+            shopt -s nullglob
+
+            for archive in iris_chunk_*.b64 *.zip; do
+              [ -e "$archive" ] || continue
+              echo "Found archive: $archive"
+
+              if [[ "$archive" == *.b64 ]]; then
+                mkdir -p extracted
+                echo "Decoding base64 bundle into extracted/"
+                (cat "$archive" | tr -d '\n\r ' | base64 -d | tar -xJf - -C extracted) || \
+                (cat "$archive" | tr -d '\n\r ' | base64 -d | tar -xzf - -C extracted)
+              else
+                echo "Unzipping archive into extracted/"
+                unzip -q -o "$archive" -d extracted
               fi
-            fi
+            done
           fi
-          PUBSPEC_PATH=$(find . -maxdepth 3 -name "pubspec.yaml" | head -n 1)
-          if [ -z "$PUBSPEC_PATH" ]; then
-            echo "::warning::Waiting for iris-apk-cloud-build-ready.zip to be uploaded to the repository."
-            echo "ready=false" >> $GITHUB_OUTPUT
-          else
-            PROJECT_DIR=$(dirname "$PUBSPEC_PATH")
-            echo "project_dir=$PROJECT_DIR" >> $GITHUB_OUTPUT
-            echo "ready=true" >> $GITHUB_OUTPUT
-            echo "Located Flutter project at: $PROJECT_DIR"
+
+          PROJECT_DIR="$(find . -type f -name pubspec.yaml -not -path '*/.git/*' | head -n 1 | xargs -r dirname)"
+          if [ -z "${PROJECT_DIR:-}" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No Flutter project was found in the repo or extracted archive."
+            exit 0
           fi
+
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+          echo "Flutter project located at: $PROJECT_DIR"
 
       - name: Set up JDK 17
         if: steps.locate.outputs.ready == 'true'
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: temurin
+          java-version: "17"
 
-      - name: Set up Flutter Stable
+      - name: Set up Flutter
         if: steps.locate.outputs.ready == 'true'
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
+          channel: stable
           cache: true
 
-      - name: Install Flutter dependencies
+      - name: Install dependencies
         if: steps.locate.outputs.ready == 'true'
         working-directory: ${{ steps.locate.outputs.project_dir }}
         run: flutter pub get
 
-      - name: Build Release APK
+      - name: Build release APK
         if: steps.locate.outputs.ready == 'true'
         working-directory: ${{ steps.locate.outputs.project_dir }}
         run: |
+          set -euo pipefail
+          flutter clean
+          flutter pub get
           flutter build apk --release --no-tree-shake-icons
           cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/IRIS-LiquidGlass-Perfected-Release.apk"
 
-      - name: Upload APK Artifact (Downloadable in Actions tab)
+      - name: Upload APK artifact
         if: steps.locate.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
@@ -78,13 +93,12 @@ jobs:
           path: IRIS-LiquidGlass-Perfected-Release.apk
           if-no-files-found: error
 
-      - name: Publish APK to GitHub Releases (Direct 1-Tap Phone Download)
+      - name: Publish APK to GitHub Release
         if: steps.locate.outputs.ready == 'true' && github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.3-perfected-${{ github.run_number }}
-          name: "IRIS Perfected Liquid Glass & 7-Theme Build (#${{ github.run_number }})"
+          name: IRIS Perfected Liquid Glass Build (#${{ github.run_number }})
           body: |
-            ### Direct Android APK Download (No Computer Required)
-            Tap **`IRIS-LiquidGlass-Perfected-Release.apk`** under **Assets** below to download and install directly on your Android phone.
+            Download the APK asset below and install it directly on your Android device.
           files: IRIS-LiquidGlass-Perfected-Release.apk

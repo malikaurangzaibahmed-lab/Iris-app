@@ -82,36 +82,29 @@ jobs:
           echo "Flutter project located at: $PROJECT_DIR"
           echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
-      - name: Repair missing Material 3 Expressive local package
+      - name: Resolve Material 3 Expressive dependency
         working-directory: ${{ steps.locate.outputs.project_dir }}
         shell: bash
         run: |
           set -euo pipefail
-
-          if ! grep -qE '^  material_3_expressive:[[:space:]]*$' pubspec.yaml; then
-            echo "No path-based material_3_expressive dependency declared; nothing to repair."
-            exit 0
+          if grep -qE '^  material_3_expressive:[[:space:]]*$' pubspec.yaml; then
+            # The uploaded archive refers to a local path that is not included.
+            # Use the same package version from pubspec.lock via pub.dev instead.
+            python3 - <<'PY'
+          from pathlib import Path
+          p = Path("pubspec.yaml")
+          s = p.read_text()
+          s = s.replace(
+              "  material_3_expressive:\n    path: packages/material_3_expressive",
+              "  material_3_expressive: 1.1.3",
+          )
+          p.write_text(s)
+          PY
+            if grep -qE '^  material_3_expressive:[[:space:]]*$' pubspec.yaml; then
+              echo "::error::Could not replace missing local material_3_expressive path dependency."
+              exit 1
+            fi
           fi
-
-          PACKAGE_DIR="packages/material_3_expressive"
-          if [ -f "$PACKAGE_DIR/pubspec.yaml" ]; then
-            echo "Material 3 Expressive package already exists."
-            exit 0
-          fi
-
-          echo "::warning::Local package is missing. Restoring it from the maintained IRIS source repository."
-          tmp="$(mktemp -d)"
-          git clone --depth 1 --filter=blob:none --sparse https://github.com/malikaurangzaibahmed-lab/iris-enhanced.git "$tmp/iris-source"
-          git -C "$tmp/iris-source" sparse-checkout set packages/material_3_expressive
-          if [ ! -f "$tmp/iris-source/packages/material_3_expressive/pubspec.yaml" ]; then
-            echo "::error::Could not retrieve packages/material_3_expressive from iris-enhanced."
-            exit 1
-          fi
-          mkdir -p "$PACKAGE_DIR"
-          cp -a "$tmp/iris-source/packages/material_3_expressive/." "$PACKAGE_DIR/"
-          rm -rf "$tmp"
-          test -f "$PACKAGE_DIR/pubspec.yaml"
-          echo "Restored $PACKAGE_DIR"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4

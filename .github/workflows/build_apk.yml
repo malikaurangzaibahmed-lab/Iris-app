@@ -169,31 +169,42 @@ jobs:
           PACKAGE_DIR="$HOME/.pub-cache/hosted/pub.dev/material_3_expressive-1.1.3/lib"
           python3 - "$PACKAGE_DIR" <<'PY'
           from pathlib import Path
+          import re
           import sys
 
           root = Path(sys.argv[1])
           if not root.is_dir():
               raise SystemExit(f"Material 3 Expressive source not found: {root}")
 
-          # material_ui and material_new_shapes both export RoundedPolygon and
-          # CornerRounding, but these are different incompatible types. Prefer
-          # the material_new_shapes definitions wherever M3E consumes polygons.
+          # Fix the incompatible duplicate shape exports from material_ui.
           touched = []
           for p in root.rglob("*.dart"):
               s = p.read_text()
               original = s
-
               s = s.replace(
                   "import 'package:material_ui/material_ui.dart';",
                   "import 'package:material_ui/material_ui.dart' hide RoundedPolygon, CornerRounding;",
               )
 
-              # The refresh indicator exposes List<RoundedPolygon>, so explicitly
-              # import the canonical type after hiding the conflicting UI export.
               if p.name == "m3e_refresh_indicator.dart":
-                  line = "import 'package:material_new_shapes/material_new_shapes.dart';"
-                  if line not in s:
-                      s = line + "\\n" + s
+                  # Part files share imports from their parent library. Add imports
+                  # as Dart directives, after the library directive (never before it).
+                  for directive in (
+                      "import 'dart:async';",
+                      "import 'package:material_new_shapes/material_new_shapes.dart';",
+                  ):
+                      if directive not in s:
+                          library = re.search(r"(?m)^library\\s+[^;]+;\\s*$", s)
+                          if library:
+                              pos = library.end()
+                              s = s[:pos] + "\\n" + directive + s[pos:]
+                          else:
+                              imports = list(re.finditer(r"(?m)^import\\s+[^;]+;\\s*$", s))
+                              if imports:
+                                  pos = imports[-1].end()
+                                  s = s[:pos] + "\\n" + directive + s[pos:]
+                              else:
+                                  s = directive + "\\n" + s
 
               if s != original:
                   p.write_text(s)
@@ -209,10 +220,12 @@ jobs:
           refresh_text = refresh.read_text()
           if "package:material_new_shapes/material_new_shapes.dart" not in refresh_text:
               raise SystemExit("Refresh indicator is missing canonical material_new_shapes import")
-          if "package:material_ui/material_ui.dart';" in refresh_text:
+          if "import 'dart:async';" not in refresh_text:
+              raise SystemExit("Refresh indicator is missing dart:async for its part files")
+          if "import 'package:material_ui/material_ui.dart';" in refresh_text:
               raise SystemExit("Refresh indicator still imports conflicting material_ui shape types")
           loading_text = loading.read_text()
-          if "package:material_ui/material_ui.dart';" in loading_text:
+          if "import 'package:material_ui/material_ui.dart';" in loading_text:
               raise SystemExit("Loading indicator still imports conflicting material_ui shape types")
 
           print("Patched conflicting shape imports in: " + ", ".join(touched))

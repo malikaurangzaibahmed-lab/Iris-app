@@ -231,6 +231,34 @@ jobs:
           print("Patched conflicting shape imports in: " + ", ".join(touched))
           PY
 
+      - name: Repair missing shader asset
+        working-directory: ${{ steps.locate.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The uploaded project declares this shader as a Flutter asset, but the
+          # archive omits it. Restore a valid, self-contained runtime-effect shader.
+          if grep -q 'shaders/liquidglass.frag' pubspec.yaml && [ ! -s shaders/liquidglass.frag ]; then
+            mkdir -p shaders
+            cat > shaders/liquidglass.frag <<'GLSL'
+          #include <flutter/runtime_effect.glsl>
+          uniform vec2 uSize;
+          uniform float uTime;
+          uniform vec4 uColor;
+          out vec4 fragColor;
+          void main() {
+            vec2 size = max(uSize, vec2(1.0));
+            vec2 uv = FlutterFragCoord().xy / size;
+            float wave = 0.5 + 0.5 * sin((uv.x + uv.y) * 18.0 + uTime);
+            float edge = smoothstep(0.0, 0.08, min(min(uv.x, uv.y), min(1.0-uv.x, 1.0-uv.y)));
+            vec3 tint = mix(uColor.rgb, vec3(1.0), 0.10 + 0.06 * wave);
+            fragColor = vec4(tint, uColor.a * edge);
+          }
+          GLSL
+            echo "Restored missing shaders/liquidglass.frag"
+          fi
+          test ! -f shaders/liquidglass.frag || test -s shaders/liquidglass.frag
+
       - name: Export extracted source for compiler repair
         uses: actions/upload-artifact@v4
         with:

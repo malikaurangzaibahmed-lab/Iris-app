@@ -161,7 +161,7 @@ jobs:
         working-directory: ${{ steps.locate.outputs.project_dir }}
         run: flutter pub get
 
-      - name: Patch upstream Material 3 Expressive import ambiguity
+      - name: Patch upstream Material 3 Expressive shape imports
         working-directory: ${{ steps.locate.outputs.project_dir }}
         shell: bash
         run: |
@@ -171,27 +171,33 @@ jobs:
           from pathlib import Path
           import sys
           root = Path(sys.argv[1])
-          patches = {
-              "components/refresh_indicator/m3e_refresh_indicator.dart": [
-                  ("import '../../foundations/foundations.dart';",
-                   "import '../../foundations/foundations.dart' hide RoundedPolygon;")
-              ],
-              "components/loading_indicator/components/m3e_expressive_loading_indicator.dart": [
-                  ("import 'package:material_ui/material_ui.dart';",
-                   "import 'package:material_ui/material_ui.dart' hide RoundedPolygon;")
-              ],
-          }
-          for rel, replacements in patches.items():
-              path = root / rel
-              if not path.exists():
-                  raise SystemExit(f"Expected dependency source not found: {path}")
-              text = path.read_text()
-              for old, new in replacements:
-                  if old not in text and new not in text:
-                      raise SystemExit(f"Expected import not found in {path}: {old}")
-                  text = text.replace(old, new)
-              path.write_text(text)
-          print("Resolved duplicate RoundedPolygon imports in upstream package.")
+          # The package re-exports RoundedPolygon from material_new_shapes,
+          # but material_ui also exports a different class with the same name.
+          # Ensure the refresh widget's public polygons type comes from the
+          # same material_new_shapes library as its internal builder.
+          p = root / "components/refresh_indicator/m3e_refresh_indicator.dart"
+          if not p.exists():
+              raise SystemExit(f"Expected dependency source not found: {p}")
+          s = p.read_text()
+          s = s.replace(
+              "import 'package:material_ui/material_ui.dart';",
+              "import 'package:material_ui/material_ui.dart' hide RoundedPolygon, CornerRounding;",
+          )
+          s = s.replace(
+              "import 'package:material_new_shapes/material_new_shapes.dart';",
+              "import 'package:material_new_shapes/material_new_shapes.dart';",
+          )
+          # Existing package may use the package's foundations export for shapes.
+          # Hide Material UI's conflicting names there too, while keeping the
+          # actual shape type sourced from material_new_shapes.
+          s = s.replace(
+              "import '../../foundations/foundations.dart';",
+              "import '../../foundations/foundations.dart' hide RoundedPolygon, CornerRounding;",
+          )
+          if "hide RoundedPolygon, CornerRounding" not in s:
+              raise SystemExit("Could not apply RoundedPolygon import disambiguation")
+          p.write_text(s)
+          print("Patched refresh-indicator shape imports.")
           PY
 
       - name: Export extracted source for compiler repair

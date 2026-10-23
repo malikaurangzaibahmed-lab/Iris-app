@@ -151,8 +151,8 @@ def compiler_fixes():
     p = Path("lib/widgets/effects/glass_container_transform.dart")
     if p.exists():
         s = p.read_text()
-        s = re.sub(r"final clampedX = (tapPos\.dx\.clamp\([\s\S]*?\n      \));", r"final clampedX = (\1).toDouble()", s, count=1)
-        s = re.sub(r"final clampedY = (tapPos\.dy\.clamp\([\s\S]*?\n      \));", r"final clampedY = (\1).toDouble()", s, count=1)
+        s = re.sub(r"final clampedX = (tapPos\.dx\.clamp\([\s\S]*?\n      \));", r"final clampedX = (\1).toDouble();", s, count=1)
+        s = re.sub(r"final clampedY = (tapPos\.dy\.clamp\([\s\S]*?\n      \));", r"final clampedY = (\1).toDouble();", s, count=1)
         # Preserve the assignment prefix after wrapping the clamp expression.
         s = s.replace("final clampedX = (", "final clampedX = (", 1)
         s = s.replace("final clampedY = (", "final clampedY = (", 1)

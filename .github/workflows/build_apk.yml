@@ -151,6 +151,14 @@ jobs:
         working-directory: ${{ steps.locate.outputs.project_dir }}
         run: flutter pub get
 
+      - name: Export extracted source for compiler repair
+        uses: actions/upload-artifact@v4
+        with:
+          name: IRIS-source-debug
+          path: ${{ steps.locate.outputs.project_dir }}/lib
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Analyze and build release APK
         working-directory: ${{ steps.locate.outputs.project_dir }}
         shell: bash

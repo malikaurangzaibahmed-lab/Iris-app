@@ -13,92 +13,149 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
-      - name: Checkout repository
+      - name: Checkout build repository
         uses: actions/checkout@v4
 
-      - name: Locate or unpack Flutter project
+      - name: Locate and extract Flutter project
         id: locate
         shell: bash
         run: |
           set -euo pipefail
 
-          if [ ! -f "pubspec.yaml" ]; then
-            echo "No Flutter project at repo root; checking for bundled archives..."
+          # Prefer a project already checked into the repository.
+          PROJECT_DIR=""
+          if [ -f "pubspec.yaml" ]; then
+            PROJECT_DIR="."
+          else
+            # The project is normally uploaded as a ZIP. Extract archives into
+            # a dedicated directory so we don't overwrite the workflow files.
+            mkdir -p extracted
             shopt -s nullglob
+            found_archive=false
 
-            for archive in iris_chunk_*.b64 *.zip; do
-              [ -e "$archive" ] || continue
-              echo "Found archive: $archive"
-
-              if [[ "$archive" == *.b64 ]]; then
-                mkdir -p extracted
-                echo "Decoding base64 bundle into extracted/"
-                (cat "$archive" | tr -d '\n\r ' | base64 -d | tar -xJf - -C extracted) || \
-                (cat "$archive" | tr -d '\n\r ' | base64 -d | tar -xzf - -C extracted)
-              else
-                echo "Unzipping archive into extracted/"
-                unzip -q -o "$archive" -d extracted
-              fi
+            for archive in ./*.zip; do
+              found_archive=true
+              echo "Extracting $archive"
+              unzip -o "$archive" -d extracted
             done
+
+            for archive in ./iris_chunk_*.b64; do
+              found_archive=true
+              echo "Decoding $archive"
+              tmp="$(mktemp)"
+              tr -d '\n\r ' < "$archive" | base64 -d > "$tmp"
+              if tar -tf "$tmp" >/dev/null 2>&1; then
+                tar -xf "$tmp" -C extracted
+              else
+                echo "::error::Decoded archive $archive is not a valid tar archive."
+                exit 1
+              fi
+              rm -f "$tmp"
+            done
+
+            # Pick the Flutter application (pubspec plus lib/main.dart), not a
+            # nested package's pubspec.yaml.
+            while IFS= read -r candidate; do
+              dir="$(dirname "$candidate")"
+              if [ -f "$dir/lib/main.dart" ]; then
+                PROJECT_DIR="$dir"
+                break
+              fi
+            done < <(find extracted -type f -name pubspec.yaml -not -path '*/.dart_tool/*' | sort)
+
+            # Also support a ZIP whose contents are at the repository root.
+            if [ -z "$PROJECT_DIR" ] && [ -f "lib/main.dart" ]; then
+              PROJECT_DIR="."
+            fi
+
+            if [ -z "$PROJECT_DIR" ]; then
+              echo "::error::No Flutter app found. Expected pubspec.yaml and lib/main.dart in the repo or uploaded ZIP."
+              echo "Repository files:"
+              find . -maxdepth 4 -type f | sort | head -200
+              exit 1
+            fi
           fi
 
-          PROJECT_DIR="$(find . -type f -name pubspec.yaml -not -path '*/.git/*' | head -n 1 | xargs -r dirname)"
-          if [ -z "${PROJECT_DIR:-}" ]; then
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::No Flutter project was found in the repo or extracted archive."
+          echo "Flutter project located at: $PROJECT_DIR"
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Repair missing Material 3 Expressive local package
+        working-directory: ${{ steps.locate.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! grep -qE '^  material_3_expressive:[[:space:]]*$' pubspec.yaml; then
+            echo "No path-based material_3_expressive dependency declared; nothing to repair."
             exit 0
           fi
 
-          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
-          echo "ready=true" >> "$GITHUB_OUTPUT"
-          echo "Flutter project located at: $PROJECT_DIR"
+          PACKAGE_DIR="packages/material_3_expressive"
+          if [ -f "$PACKAGE_DIR/pubspec.yaml" ]; then
+            echo "Material 3 Expressive package already exists."
+            exit 0
+          fi
+
+          echo "::warning::Local package is missing. Restoring it from the maintained IRIS source repository."
+          tmp="$(mktemp -d)"
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/malikaurangzaibahmed-lab/iris-enhanced.git "$tmp/iris-source"
+          git -C "$tmp/iris-source" sparse-checkout set packages/material_3_expressive
+          if [ ! -f "$tmp/iris-source/packages/material_3_expressive/pubspec.yaml" ]; then
+            echo "::error::Could not retrieve packages/material_3_expressive from iris-enhanced."
+            exit 1
+          fi
+          mkdir -p "$PACKAGE_DIR"
+          cp -a "$tmp/iris-source/packages/material_3_expressive/." "$PACKAGE_DIR/"
+          rm -rf "$tmp"
+          test -f "$PACKAGE_DIR/pubspec.yaml"
+          echo "Restored $PACKAGE_DIR"
 
       - name: Set up JDK 17
-        if: steps.locate.outputs.ready == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Flutter
-        if: steps.locate.outputs.ready == 'true'
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
+      - name: Show Flutter and Dart versions
+        run: flutter --version
+
       - name: Install dependencies
-        if: steps.locate.outputs.ready == 'true'
         working-directory: ${{ steps.locate.outputs.project_dir }}
         run: flutter pub get
 
-      - name: Build release APK
-        if: steps.locate.outputs.ready == 'true'
+      - name: Analyze and build release APK
         working-directory: ${{ steps.locate.outputs.project_dir }}
+        shell: bash
         run: |
           set -euo pipefail
-          flutter clean
-          flutter pub get
+          flutter analyze --no-pub
           flutter build apk --release --no-tree-shake-icons
-          cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/IRIS-LiquidGlass-Perfected-Release.apk"
+          test -s build/app/outputs/flutter-apk/app-release.apk
+          cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/IRIS-LiquidGlass-Release.apk"
 
       - name: Upload APK artifact
-        if: steps.locate.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: IRIS-LiquidGlass-Perfected-APK
-          path: IRIS-LiquidGlass-Perfected-Release.apk
+          name: IRIS-LiquidGlass-APK
+          path: IRIS-LiquidGlass-Release.apk
           if-no-files-found: error
+          retention-days: 14
 
       - name: Publish APK to GitHub Release
-        if: steps.locate.outputs.ready == 'true' && github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.3-perfected-${{ github.run_number }}
-          name: IRIS Perfected Liquid Glass Build (#${{ github.run_number }})
+          tag_name: iris-apk-build-${{ github.run_number }}
+          name: IRIS Android APK Build #${{ github.run_number }}
           body: |
-            Download the APK asset below and install it directly on your Android device.
-          files: IRIS-LiquidGlass-Perfected-Release.apk
+            Release APK built by GitHub Actions from the uploaded IRIS Flutter project.
+          files: IRIS-LiquidGlass-Release.apk

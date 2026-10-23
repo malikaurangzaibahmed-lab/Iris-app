@@ -170,34 +170,52 @@ jobs:
           python3 - "$PACKAGE_DIR" <<'PY'
           from pathlib import Path
           import sys
+
           root = Path(sys.argv[1])
-          # The package re-exports RoundedPolygon from material_new_shapes,
-          # but material_ui also exports a different class with the same name.
-          # Ensure the refresh widget's public polygons type comes from the
-          # same material_new_shapes library as its internal builder.
-          p = root / "components/refresh_indicator/m3e_refresh_indicator.dart"
-          if not p.exists():
-              raise SystemExit(f"Expected dependency source not found: {p}")
-          s = p.read_text()
-          s = s.replace(
-              "import 'package:material_ui/material_ui.dart';",
-              "import 'package:material_ui/material_ui.dart' hide RoundedPolygon, CornerRounding;",
-          )
-          s = s.replace(
-              "import 'package:material_new_shapes/material_new_shapes.dart';",
-              "import 'package:material_new_shapes/material_new_shapes.dart';",
-          )
-          # Existing package may use the package's foundations export for shapes.
-          # Hide Material UI's conflicting names there too, while keeping the
-          # actual shape type sourced from material_new_shapes.
-          s = s.replace(
-              "import '../../foundations/foundations.dart';",
-              "import '../../foundations/foundations.dart' hide RoundedPolygon, CornerRounding;",
-          )
-          if "hide RoundedPolygon, CornerRounding" not in s:
-              raise SystemExit("Could not apply RoundedPolygon import disambiguation")
-          p.write_text(s)
-          print("Patched refresh-indicator shape imports.")
+          if not root.is_dir():
+              raise SystemExit(f"Material 3 Expressive source not found: {root}")
+
+          # material_ui and material_new_shapes both export RoundedPolygon and
+          # CornerRounding, but these are different incompatible types. Prefer
+          # the material_new_shapes definitions wherever M3E consumes polygons.
+          touched = []
+          for p in root.rglob("*.dart"):
+              s = p.read_text()
+              original = s
+
+              s = s.replace(
+                  "import 'package:material_ui/material_ui.dart';",
+                  "import 'package:material_ui/material_ui.dart' hide RoundedPolygon, CornerRounding;",
+              )
+
+              # The refresh indicator exposes List<RoundedPolygon>, so explicitly
+              # import the canonical type after hiding the conflicting UI export.
+              if p.name == "m3e_refresh_indicator.dart":
+                  line = "import 'package:material_new_shapes/material_new_shapes.dart';"
+                  if line not in s:
+                      s = line + "\\n" + s
+
+              if s != original:
+                  p.write_text(s)
+                  touched.append(str(p.relative_to(root)))
+
+          refresh = root / "components/refresh_indicator/m3e_refresh_indicator.dart"
+          builder = root / "components/refresh_indicator/components/m3e_refresh_indicator_build.dart"
+          loading = root / "components/loading_indicator/components/m3e_expressive_loading_indicator.dart"
+          for required in (refresh, builder, loading):
+              if not required.exists():
+                  raise SystemExit(f"Expected upstream file not found: {required}")
+
+          refresh_text = refresh.read_text()
+          if "package:material_new_shapes/material_new_shapes.dart" not in refresh_text:
+              raise SystemExit("Refresh indicator is missing canonical material_new_shapes import")
+          if "package:material_ui/material_ui.dart';" in refresh_text:
+              raise SystemExit("Refresh indicator still imports conflicting material_ui shape types")
+          loading_text = loading.read_text()
+          if "package:material_ui/material_ui.dart';" in loading_text:
+              raise SystemExit("Loading indicator still imports conflicting material_ui shape types")
+
+          print("Patched conflicting shape imports in: " + ", ".join(touched))
           PY
 
       - name: Export extracted source for compiler repair

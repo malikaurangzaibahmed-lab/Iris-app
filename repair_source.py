@@ -145,41 +145,44 @@ def room_service(s):
 edit("lib/services/room_persistence_service.dart", room_service)
 
 
+
 # Follow-up repairs for diagnostics from the release compiler.
 def compiler_fixes():
     p = Path("lib/widgets/effects/glass_container_transform.dart")
     if p.exists():
         s = p.read_text()
-        s = re.sub(r"final clampedX = (tapPos\\.dx\\.clamp\\([\\s\\S]*?\\n      \\));", r"final clampedX = (\\1).toDouble();", s, count=1)
-        s = re.sub(r"final clampedY = (tapPos\\.dy\\.clamp\\([\\s\\S]*?\\n      \\));", r"final clampedY = (\\1).toDouble();", s, count=1)
+        s = re.sub(r"final clampedX = (tapPos\.dx\.clamp\([\s\S]*?\n      \));", r"(\1).toDouble()", s, count=1)
+        s = re.sub(r"final clampedY = (tapPos\.dy\.clamp\([\s\S]*?\n      \));", r"(\1).toDouble()", s, count=1)
+        # Preserve the assignment prefix after wrapping the clamp expression.
+        s = s.replace("final clampedX = (", "final clampedX = (", 1)
+        s = s.replace("final clampedY = (", "final clampedY = (", 1)
         p.write_text(s)
 
     p = Path("lib/widgets/controls/iris_expressive_controls.dart")
     if p.exists():
-        s = p.read_text().replace("segments: segments,\n                  height: height,", "segments: segments.map((segment) => lgw.GlassSegment(label: segment)).toList(),\n                  height: height,")
+        s = p.read_text().replace(
+            "segments: segments,\n                  height: height,",
+            "segments: segments.map((segment) => lgw.GlassSegment(label: segment)).toList(),\n                  height: height,",
+        )
         p.write_text(s)
 
     p = Path("lib/screens/faculty/faculty_schedule_view.dart")
     if p.exists():
         s = p.read_text()
-        # These widgets are inside a const Row, but the color is theme-dependent.
-        s = s.replace("child: const Row(\n                      mainAxisSize: MainAxisSize.min,", "child: Row(\n                      mainAxisSize: MainAxisSize.min,")
-        s = s.replace("                          color: primaryTextColor,\n                        ),\n                        SizedBox(width: 4),\n                        Text(\n                          'Switch Faculty',\n                          style: TextStyle(", "                          color: primaryTextColor,\n                        ),\n                        const SizedBox(width: 4),\n                        Text(\n                          'Switch Faculty',\n                          style: TextStyle(")
-        s = s.replace("                            color: primaryTextColor,\n                            letterSpacing: 0.2,", "                            color: primaryTextColor,\n                            letterSpacing: 0.2,")
-        p.write_text(s)
-
-    p = Path("lib/screens/tools/uni_info_screen.dart")
-    if p.exists():
-        s = p.read_text()
-        s = s.replace("final details = RoomPersistenceService.detailsForRoom(r.id);", "final details = RoomPersistenceService.detailsForRoom(r.id);")
+        s = s.replace(
+            "child: const Row(\n                      mainAxisSize: MainAxisSize.min,",
+            "child: Row(\n                      mainAxisSize: MainAxisSize.min,",
+        )
         p.write_text(s)
 
     p = Path("lib/services/room_persistence_service.dart")
-    if p.exists():
+    if p.exists() and "static RoomLocationDetails? detailsForRoom(" not in p.read_text():
         s = p.read_text()
-        if "static RoomLocationDetails? detailsForRoom(" not in s:
-            marker = "  static const String _key = 'iris_rooms';"
-            s = s.replace(marker, marker + "\\n\\n  static RoomLocationDetails? detailsForRoom(String id) => _groundTruthRooms[id.toUpperCase()];")
-            p.write_text(s)
+        marker = "  static const String _key = 'iris_rooms';"
+        s = s.replace(
+            marker,
+            marker + "\n\n  static RoomLocationDetails? detailsForRoom(String id) => _groundTruthRooms[id.toUpperCase()];",
+        )
+        p.write_text(s)
 
 compiler_fixes()

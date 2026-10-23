@@ -194,17 +194,17 @@ jobs:
                       "import 'package:material_new_shapes/material_new_shapes.dart';",
                   ):
                       if directive not in s:
-                          library = re.search(r"(?m)^library\\s+[^;]+;\\s*$", s)
+                          library = re.search(r"(?m)^library\s+[^;]+;\s*$", s)
                           if library:
                               pos = library.end()
-                              s = s[:pos] + "\\n" + directive + s[pos:]
+                              s = s[:pos] + "\n" + directive + s[pos:]
                           else:
-                              imports = list(re.finditer(r"(?m)^import\\s+[^;]+;\\s*$", s))
+                              imports = list(re.finditer(r"(?m)^import\s+[^;]+;\s*$", s))
                               if imports:
                                   pos = imports[-1].end()
-                                  s = s[:pos] + "\\n" + directive + s[pos:]
+                                  s = s[:pos] + "\n" + directive + s[pos:]
                               else:
-                                  s = directive + "\\n" + s
+                                  s = directive + "\n" + s
 
               if s != original:
                   p.write_text(s)

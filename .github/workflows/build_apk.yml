@@ -22,40 +22,56 @@ jobs:
         id: locate
         run: |
           if [ ! -f "pubspec.yaml" ]; then
-            ZIP_FILE=$(find . -maxdepth 2 -name "*.zip" | head -n 1)
-            if [ -n "$ZIP_FILE" ]; then
-              echo "Unpacking $ZIP_FILE..."
-              unzip -q -o "$ZIP_FILE"
+            if ls iris_chunk_*.b64 >/dev/null 2>&1; then
+              echo "Reassembling iris_chunk_*.b64..."
+              cat iris_chunk_*.b64 | tr -d '\n\r ' | base64 -d | tar -xJf -
+            else
+              ZIP_FILE=$(find . -maxdepth 2 -name "*.zip" | head -n 1)
+              if [ -n "$ZIP_FILE" ]; then
+                echo "Unpacking $ZIP_FILE..."
+                unzip -q -o "$ZIP_FILE"
+              fi
             fi
           fi
           PUBSPEC_PATH=$(find . -maxdepth 3 -name "pubspec.yaml" | head -n 1)
-          PROJECT_DIR=$(dirname "$PUBSPEC_PATH")
-          echo "project_dir=$PROJECT_DIR" >> $GITHUB_OUTPUT
-          echo "Located Flutter project at: $PROJECT_DIR"
+          if [ -z "$PUBSPEC_PATH" ]; then
+            echo "::warning::Waiting for iris-apk-cloud-build-ready.zip to be uploaded to the repository."
+            echo "ready=false" >> $GITHUB_OUTPUT
+          else
+            PROJECT_DIR=$(dirname "$PUBSPEC_PATH")
+            echo "project_dir=$PROJECT_DIR" >> $GITHUB_OUTPUT
+            echo "ready=true" >> $GITHUB_OUTPUT
+            echo "Located Flutter project at: $PROJECT_DIR"
+          fi
 
       - name: Set up JDK 17
+        if: steps.locate.outputs.ready == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
       - name: Set up Flutter Stable
+        if: steps.locate.outputs.ready == 'true'
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
 
       - name: Install Flutter dependencies
+        if: steps.locate.outputs.ready == 'true'
         working-directory: ${{ steps.locate.outputs.project_dir }}
         run: flutter pub get
 
       - name: Build Release APK
+        if: steps.locate.outputs.ready == 'true'
         working-directory: ${{ steps.locate.outputs.project_dir }}
         run: |
           flutter build apk --release --no-tree-shake-icons
           cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/IRIS-LiquidGlass-Perfected-Release.apk"
 
       - name: Upload APK Artifact (Downloadable in Actions tab)
+        if: steps.locate.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: IRIS-LiquidGlass-Perfected-APK
@@ -63,7 +79,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish APK to GitHub Releases (Direct 1-Tap Phone Download)
-        if: github.event_name != 'pull_request'
+        if: steps.locate.outputs.ready == 'true' && github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.3-perfected-${{ github.run_number }}

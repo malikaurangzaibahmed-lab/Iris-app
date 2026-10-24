@@ -127,7 +127,7 @@ jobs:
           p = root / 'lib/widgets/cards/class_card.dart'
           s = p.read_text()
           marker = 'class _ClassCardState extends State<ClassCard> {'
-          getter = '\\n  IrisThemeStyle get currentStyle => ThemeSignals.themeStyle.value;\\n'
+          getter = '\n  IrisThemeStyle get currentStyle => ThemeSignals.themeStyle.value;\n'
           if marker in s and 'IrisThemeStyle get currentStyle =>' not in s:
               s = s.replace(marker, marker + getter, 1)
           p.write_text(s)

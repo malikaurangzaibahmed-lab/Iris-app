@@ -126,6 +126,10 @@ jobs:
           p.write_text(s)
           p = root / 'lib/widgets/cards/class_card.dart'
           s = p.read_text()
+          marker = 'class _ClassCardState extends State<ClassCard> {'
+          getter = '\\n  IrisThemeStyle get currentStyle => ThemeSignals.themeStyle.value;\\n'
+          if marker in s and 'IrisThemeStyle get currentStyle =>' not in s:
+              s = s.replace(marker, marker + getter, 1)
           p.write_text(s)
           p = root / 'lib/widgets/controls/iris_expressive_controls.dart'
           s = p.read_text().replace('segments: segments,', 'segments: segments.map((label) => lgw.GlassSegment(label: label)).toList(),')

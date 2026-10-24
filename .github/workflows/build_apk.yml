@@ -78,6 +78,45 @@ jobs:
         working-directory: ${{ steps.locate.outputs.project_dir }}
         run: flutter pub get
 
+      - name: Apply Dart and API compatibility fixes
+        working-directory: ${{ steps.locate.outputs.project_dir }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          root = Path('.')
+          # Enable the Dart language features already used by this source tree.
+          p = root / 'pubspec.yaml'
+          s = p.read_text()
+          s = re.sub(r"sdk:\s*['\"]?[^'\"\\n]+['\"]?", "sdk: '>=3.8.0 <4.0.0'", s, count=1)
+          p.write_text(s)
+          # Dart versions in the cloud image reject duplicate named-parameter identifiers.
+          for p in (root / 'lib').rglob('*.dart'):
+              s = p.read_text()
+              s = s.replace('(_, _) =>', '(_, __) =>')
+              s = s.replace('(context, _, _) {', '(context, animation, secondaryAnimation) {')
+              s = s.replace('(context, _, _) =>', '(context, animation, secondaryAnimation) =>')
+              p.write_text(s)
+          # DeadlineData is rendered as a completed/pending item by the schedule screen.
+          p = root / 'lib/services/helpdesk_schedule_data_service.dart'
+          s = p.read_text()
+          needle = 'class DeadlineData {\n  final String title;'
+          if needle in s and 'class DeadlineData {\n  bool get isDone' not in s:
+              s = s.replace(needle, 'class DeadlineData {\n  bool get isDone => SemesterMilestoneEvaluator.isCompleted(date, explicitStatus: status);\n  final String title;', 1)
+          p.write_text(s)
+          # Adapt the typed library schedule payload to the existing view model.
+          p = root / 'lib/screens/tools/library_schedule_screen.dart'
+          s = p.read_text().replace('_libraryData = payload.librarySchedule;', "_libraryData = payload.librarySchedule == null ? <String, dynamic>{} : <String, dynamic>{'open': payload.librarySchedule!.open, 'break': payload.librarySchedule!.breakTime, 'close': payload.librarySchedule!.close};")
+          p.write_text(s)
+          # RoomData was renamed to Room; preserve the fields expected by the campus UI.
+          p = root / 'lib/screens/tools/uni_info_screen.dart'
+          s = p.read_text()
+          if 'typedef RoomData = Room;' not in s:
+              s = s.replace("import 'resource_hero_card.dart';", "import 'resource_hero_card.dart';\n\ntypedef RoomData = Room;\nextension RoomDataCompatibility on Room {\n  String? get attendantName => RoomPersistenceService.parseRoomCode(id).attendant;\n  String? get attendantContact => RoomPersistenceService.parseRoomCode(id).mobile;\n  String get floor => RoomPersistenceService.parseRoomCode(id).floor;\n}")
+          p.write_text(s)
+          PY
+
       - name: Build Release APK
         working-directory: ${{ steps.locate.outputs.project_dir }}
         run: |

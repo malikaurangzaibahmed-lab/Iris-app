@@ -112,6 +112,8 @@ jobs:
           # RoomData was renamed to Room; preserve the fields expected by the campus UI.
           p = root / 'lib/screens/tools/uni_info_screen.dart'
           s = p.read_text()
+          if "import '../../core/models.dart';" not in s:
+              s = s.replace("import '../../core/animations.dart';", "import '../../core/animations.dart';\\nimport '../../core/models.dart';")
           if 'typedef RoomData = Room;' not in s:
               s = s.replace("import 'resource_hero_card.dart';", "import 'resource_hero_card.dart';\n\ntypedef RoomData = Room;\nextension RoomDataCompatibility on Room {\n  String? get attendantName => RoomPersistenceService.parseRoomCode(id).attendant;\n  String? get attendantContact => RoomPersistenceService.parseRoomCode(id).mobile;\n  String get floor => RoomPersistenceService.parseRoomCode(id).floor;\n}")
           p.write_text(s)

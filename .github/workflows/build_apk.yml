@@ -117,6 +117,25 @@ jobs:
           if 'typedef RoomData = Room;' not in s:
               s = s.replace("import 'resource_hero_card.dart';", "import 'resource_hero_card.dart';\n\ntypedef RoomData = Room;\nextension RoomDataCompatibility on Room {\n  String? get attendantName => RoomPersistenceService.parseRoomCode(id).attendant;\n  String? get attendantContact => RoomPersistenceService.parseRoomCode(id).mobile;\n  String get floor => RoomPersistenceService.parseRoomCode(id).floor;\n}")
           p.write_text(s)
+          # Fix current Flutter and package API mismatches.
+          p = root / 'lib/widgets/effects/glass_container_transform.dart'
+          s = p.read_text().replace('center: Offset(clampedX, clampedY),', 'center: Offset(clampedX.toDouble(), clampedY.toDouble()),')
+          p.write_text(s)
+          p = root / 'lib/core/animations.dart'
+          s = p.read_text().replace('duration: transitionDuration ?? const Duration(milliseconds: 420),', 'transitionDuration: transitionDuration ?? const Duration(milliseconds: 420),')
+          p.write_text(s)
+          p = root / 'lib/widgets/cards/class_card.dart'
+          s = p.read_text()
+          if 'IrisThemeStyle get currentStyle' not in s:
+              s = s.replace('class _ClassCardState extends State<ClassCard> {', 'class _ClassCardState extends State<ClassCard> {\\n  IrisThemeStyle get currentStyle => IrisThemeSignals.themeStyle.value;')
+          p.write_text(s)
+          p = root / 'lib/widgets/controls/iris_expressive_controls.dart'
+          s = p.read_text().replace('segments: segments,', 'segments: segments.map((label) => lgw.GlassSegment(label: label, value: label)).toList(),')
+          p.write_text(s)
+          for name in ['lib/screens/dashboard_screen.dart', 'lib/screens/faculty/faculty_schedule_view.dart']:
+              p = root / name
+              s = p.read_text().replace('const SliverToBoxAdapter(', 'SliverToBoxAdapter(')
+              p.write_text(s)
           PY
 
       - name: Build Release APK
